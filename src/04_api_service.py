@@ -7,7 +7,7 @@ import joblib
 app = FastAPI(title="تنبؤ انسحاب المستخدمين")
 
 # -----------------------------
-# المسارات الديناميكية للنموذج وscaler
+# Load model and scaler
 # -----------------------------
 current_dir = Path(__file__).parent
 models_dir = current_dir.parent / "models"
@@ -28,14 +28,7 @@ def home():
         <title>تنبؤ انسحاب المستخدمين في خدمة بث موسيقا 🎵</title>
         <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Arabic:wght@400;700&display=swap" rel="stylesheet">
         <style>
-            body { 
-                background-color: #FFFFFF; 
-                font-family: 'IBM Plex Arabic', Arial, sans-serif; 
-                display: flex;
-                flex-direction: column;
-                align-items: center;
-                padding: 50px;
-            }
+            body { background-color: #FFFFFF; font-family: 'IBM Plex Arabic', Arial, sans-serif; display: flex; flex-direction: column; align-items: center; padding: 50px; }
             h1 { color: #333; text-align: center; margin-bottom: 40px; }
             .slider-container { margin-top: 20px; display: flex; flex-direction: column; align-items: center; }
             label { margin-bottom: 5px; font-weight: bold; }
@@ -43,16 +36,7 @@ def home():
             .range-wrapper { display: flex; width: 320px; justify-content: space-between; align-items: center; }
             input[type=range] { width: 300px; }
             .value { font-weight: bold; margin-left: 10px; }
-            button { 
-                margin-top: 30px; 
-                padding: 12px 25px; 
-                font-size: 18px; 
-                cursor: pointer; 
-                background-color: #D53636; 
-                color: white; 
-                border: none; 
-                border-radius: 6px;
-            }
+            button { margin-top: 30px; padding: 12px 25px; font-size: 18px; cursor: pointer; background-color: #D53636; color: white; border: none; border-radius: 6px; }
             #result { margin-top: 30px; text-align: center; }
             #result .prediction { font-size: 26px; font-weight: bold; }
             #result .details { font-size: 18px; color: black; margin-top: 5px; }
@@ -103,22 +87,52 @@ def home():
             </div>
 
             <div class="slider-container">
-                <label>عدد الصفحات الإيجابية: <span id="PositivePage_val" class="value">0</span></label>
+                <label>عدد الصفحات الإيجابية: <span id="is_positive_val" class="value">0</span></label>
                 <div class="description">مثال: صفحات تشير لتفاعل إيجابي مثل NextSong و Home.</div>
                 <div class="range-wrapper">
                     <span>0</span>
-                    <input type="range" id="PositivePage" min="0" max="500" value="0">
+                    <input type="range" id="is_positive" min="0" max="500" value="0">
                     <span>500</span>
                 </div>
             </div>
 
             <div class="slider-container">
-                <label>عدد الصفحات السلبية: <span id="NegativePage_val" class="value">0</span></label>
+                <label>عدد الصفحات السلبية: <span id="is_negative_val" class="value">0</span></label>
                 <div class="description">مثال: صفحات تشير لتفاعل سلبي مثل Logout و Cancel.</div>
                 <div class="range-wrapper">
                     <span>0</span>
-                    <input type="range" id="NegativePage" min="0" max="500" value="0">
+                    <input type="range" id="is_negative" min="0" max="500" value="0">
                     <span>500</span>
+                </div>
+            </div>
+
+            <div class="slider-container">
+                <label>نسبة الأحداث الإيجابية: <span id="positive_ratio_val" class="value">0</span></label>
+                <div class="description">النسبة بين الأحداث الإيجابية وإجمالي الأحداث.</div>
+                <div class="range-wrapper">
+                    <span>0</span>
+                    <input type="range" id="positive_ratio" min="0" max="1" step="0.01" value="0">
+                    <span>1</span>
+                </div>
+            </div>
+
+            <div class="slider-container">
+                <label>نسبة الأحداث السلبية: <span id="negative_ratio_val" class="value">0</span></label>
+                <div class="description">النسبة بين الأحداث السلبية وإجمالي الأحداث.</div>
+                <div class="range-wrapper">
+                    <span>0</span>
+                    <input type="range" id="negative_ratio" min="0" max="1" step="0.01" value="0">
+                    <span>1</span>
+                </div>
+            </div>
+
+            <div class="slider-container">
+                <label>متوسط وقت الاستماع لكل جلسة: <span id="avg_listen_time_val" class="value">0</span></label>
+                <div class="description">مستوى التفاعل لكل جلسة لتحديد اهتمام المستخدم.</div>
+                <div class="range-wrapper">
+                    <span>0</span>
+                    <input type="range" id="avg_listen_time" min="0" max="100" step="1" value="0">
+                    <span>100</span>
                 </div>
             </div>
         </div>
@@ -131,7 +145,7 @@ def home():
         </div>
         
         <script>
-            const sliders = ['total_sessions','total_listen_time','unique_artists','unique_songs','PositivePage','NegativePage'];
+            const sliders = ['total_sessions','total_listen_time','unique_artists','unique_songs','is_positive','is_negative','positive_ratio','negative_ratio','avg_listen_time'];
             sliders.forEach(s => {
                 const slider = document.getElementById(s);
                 const val = document.getElementById(s+'_val');
@@ -141,27 +155,42 @@ def home():
             document.getElementById("predict_btn").onclick = async () => {
                 const data = {};
                 sliders.forEach(s => { data[s] = parseFloat(document.getElementById(s).value); });
-                
+
+                // حساب total_events كما هو في المودل
+                data['total_events'] = data['is_positive'] + data['is_negative'];
+
+                const df = {
+                    'total_sessions': data['total_sessions'],
+                    'total_listen_time': data['total_listen_time'],
+                    'unique_artists': data['unique_artists'],
+                    'unique_songs': data['unique_songs'],
+                    'total_events': data['total_events'],
+                    'positive_ratio': data['positive_ratio'],
+                    'negative_ratio': data['negative_ratio'],
+                    'avg_listen_time': data['avg_listen_time']
+                };
+
                 const response = await fetch("/predict_ajax", {
                     method: "POST",
                     headers: {"Content-Type": "application/json"},
-                    body: JSON.stringify(data)
+                    body: JSON.stringify(df)
                 });
                 const result = await response.json();
 
                 const predElem = document.querySelector("#result .prediction");
                 const detailsElem = document.querySelector("#result .details");
 
-                if(result.churn_pred == 1){
-                    predElem.textContent = "منسحب";
-                    predElem.style.color = "red";
-                } else {
+                // التعديل: النص واللون يعتمد على الاحتمال مباشرة
+                if(result.churn_prob < 0.5){
                     predElem.textContent = "غير منسحب";
                     predElem.style.color = "green";
+                } else {
+                    predElem.textContent = "منسحب";
+                    predElem.style.color = "red";
                 }
 
-                // السطر الثاني: فقط النسبة بدون أي نص عربي
-                detailsElem.textContent = (result.churn_prob*100).toFixed(2) + "%";
+                // عرض النسبة كنسبة مئوية أسفل النص
+                detailsElem.textContent = "احتمال الانسحاب: " + (result.churn_prob*100).toFixed(2) + "%";
             };
         </script>
     </body>

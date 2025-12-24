@@ -4,68 +4,111 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 
 # -----------------------------
-# Paths relative to this script
+# Paths
 # -----------------------------
 current_dir = Path(__file__).parent       # src/
 project_root = current_dir.parent        # CustomerChurnProject/
 data_dir = project_root / "data"
-data_path = data_dir / "customer_churn_mini.json"
+
+# Original files
+mini_path = data_dir / "customer_churn_mini.json"
+full_path = data_dir / "customer_churn.json"
+
+# Output cleaned & merged file
 output_path = data_dir / "cleaned_customer_churn.csv"
+missing_users_path = data_dir / "missing_userId_rows.csv"
 plots_dir = data_dir / "plots"
-plots_dir.mkdir(exist_ok=True, parents=True)  # إنشاء فولدر للرسومات
+plots_dir.mkdir(exist_ok=True, parents=True)
 
-# التأكد من وجود المجلد قبل الحفظ
-output_path.parent.mkdir(parents=True, exist_ok=True)
 
-# قراءة JSON مع كل صف JSON مستقل
-df = pd.read_json(data_path, lines=True)
-print(f"✅ Loaded data: {df.shape} rows, {df.shape[1]} columns")
-print(df.head())
+# -----------------------------
+# Load data
+# -----------------------------
+df_mini = pd.read_json(mini_path, lines=True)
+df_full = pd.read_json(full_path, lines=True)
 
-# معالجة القيم الفارغة
-df.fillna({'level':'free','gender':'unknown','last_auth':'Logged Out'}, inplace=True)
+print(f"✅ Loaded mini dataset: {df_mini.shape[0]} rows")
+print(f"✅ Loaded full dataset: {df_full.shape[0]} rows")
 
-# تحليل سريع: عدد المستخدمين
-print(f"Total users: {df['userId'].nunique()}")
+# -----------------------------
+# Merge datasets
+# -----------------------------
+df = pd.concat([df_mini, df_full], ignore_index=True)
+print(f"🔗 Merged dataset: {df.shape[0]} rows, {df.shape[1]} columns")
 
-# حفظ نسخة منظفة
+# -----------------------------
+# Handle rows without userId
+# -----------------------------
+missing_userid_df = df[df['userId'].isna() | df['userId'].astype(str).str.strip().eq("")]
+if not missing_userid_df.empty:
+    print(f"⚠️ Found {missing_userid_df.shape[0]} rows without userId. Saving them separately.")
+    missing_userid_df.to_csv(missing_users_path, index=False)
+
+# Remove these rows from main dataset
+df = df[~(df['userId'].isna() | df['userId'].astype(str).str.strip().eq(""))]
+
+# Convert userId to string and strip whitespace
+df['userId'] = df['userId'].astype(str).str.strip()
+
+# -----------------------------
+# Fill missing values for other columns
+# -----------------------------
+df.fillna({'level':'free','gender':'unknown','last_auth':'Logged Out', 'page':'unknown'}, inplace=True)
+
+# Drop duplicates
+duplicates = df.duplicated().sum()
+if duplicates > 0:
+    print(f"⚠️ Found {duplicates} duplicate rows. Dropping them")
+    df.drop_duplicates(inplace=True)
+
+print(f"Total unique users after cleaning: {df['userId'].nunique()}")
+
+# -----------------------------
+# Save cleaned dataset
+# -----------------------------
 df.to_csv(output_path, index=False)
-print(f"🎯 Cleaned dataset saved: {output_path}")
+print(f"🎯 Cleaned & merged dataset saved: {output_path}")
 
 # -----------------------------
-# رسومات تحليلية
+# Prepare for EDA (unique users)
+# -----------------------------
+df_users = df.drop_duplicates(subset='userId')  # each user counted once for level/page plots
+
+# -----------------------------
+# Exploratory Data Analysis (EDA)
 # -----------------------------
 
-# 1. توزيع المستخدمين حسب المستوى (level)
+# 1. User distribution by level
 plt.figure(figsize=(6,4))
-sns.countplot(data=df, x='level', palette='pastel')
-plt.title('توزيع المستخدمين حسب المستوى')
-plt.xlabel('المستوى')
-plt.ylabel('عدد المستخدمين')
+sns.countplot(data=df_users, x='level', palette='pastel')
+plt.title('User distribution by level')
+plt.xlabel('Level')
+plt.ylabel('Number of unique users')
 plt.tight_layout()
 plt.savefig(plots_dir / "users_by_level.png")
 plt.close()
 
-# 2. توزيع المستخدمين حسب الجنس (gender)
-plt.figure(figsize=(6,4))
-sns.countplot(data=df, x='gender', palette='pastel')
-plt.title('توزيع المستخدمين حسب الجنس')
-plt.xlabel('الجنس')
-plt.ylabel('عدد المستخدمين')
+# 2. Top 10 most visited pages as Pie Chart
+top_pages = df['page'].value_counts().head(10)
+plt.figure(figsize=(8,8))
+plt.pie(top_pages.values, labels=top_pages.index, autopct='%1.1f%%', startangle=140, colors=sns.color_palette('pastel'))
+plt.title('Top 10 most visited pages')
 plt.tight_layout()
-plt.savefig(plots_dir / "users_by_gender.png")
+plt.savefig(plots_dir / "top_10_pages_pie.png")
 plt.close()
 
-# 3. عدد الجلسات لكل مستخدم (top 20 مستخدم)
+
+# 3. Top 20 users by session count (activity)
 top_users = df['userId'].value_counts().head(20)
 plt.figure(figsize=(8,5))
-sns.barplot(x=top_users.index.astype(str), y=top_users.values, palette='pastel')
-plt.title('أعلى 20 مستخدم بعدد الجلسات')
+sns.barplot(x=top_users.index, y=top_users.values, palette='pastel')
+plt.title('Top 20 users by session count')
 plt.xlabel('userId')
-plt.ylabel('عدد الجلسات')
+plt.ylabel('Number of sessions')
 plt.xticks(rotation=45)
 plt.tight_layout()
 plt.savefig(plots_dir / "top_users_sessions.png")
 plt.close()
 
-print("📊 الرسومات حفظت في:", plots_dir)
+print("📊 All plots saved in:", plots_dir)
+print(f"⚠️ Rows without userId saved in: {missing_users_path}")

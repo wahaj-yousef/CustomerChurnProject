@@ -1,79 +1,82 @@
-# 02_feature_engineering.py
 import pandas as pd
 from pathlib import Path
+import numpy as np
 
 # -----------------------------
-# Paths relative to this script
+# Paths
 # -----------------------------
-current_dir = Path(__file__).parent       # src/
-project_root = current_dir.parent        # CustomerChurnProject/
+current_dir = Path(__file__).parent
+project_root = current_dir.parent
 data_dir = project_root / "data"
-data_dir.mkdir(parents=True, exist_ok=True)
-
-# ملفات البيانات
-cleaned_path = data_dir / "cleaned_customer_churn.csv"
 feature_path = data_dir / "customer_churn_with_features.csv"
+cleaned_path = data_dir / "cleaned_customer_churn.csv"
 
 # -----------------------------
-# قراءة البيانات النظيفة
+# Load cleaned data
 # -----------------------------
-if not cleaned_path.exists():
-    raise FileNotFoundError(f"❌ الملف غير موجود: {cleaned_path}")
-
 df = pd.read_csv(cleaned_path)
-print(f"✅ Loaded cleaned data: {df.shape} rows, {df.shape[1]} columns")
-
-# -----------------------------
-# تنظيف البيانات الأساسية
-# -----------------------------
-df = df[df['userId'].notna()]
-
-# إنشاء last_auth: إذا الصفحة Logout → Logged Out، وإلا خذ auth
-df['last_auth'] = df.apply(lambda row: 'Logged Out' if row['page']=='Logout' else row['auth'], axis=1)
+df['ts'] = pd.to_datetime(df['ts'])
 
 # -----------------------------
 # Feature Engineering
 # -----------------------------
-# عدد الجلسات، إجمالي وقت الاستماع، عدد الفنانين والأغاني المختلفة لكل مستخدم
+# Aggregate sessions per user
 df_sessions = df.groupby('userId').agg({
-    'sessionId': 'count',
-    'length': 'sum',
-    'artist': 'nunique',
-    'song': 'nunique'
+    'sessionId':'count',
+    'length':'sum',
+    'artist':'nunique',
+    'song':'nunique'
 }).rename(columns={
-    'sessionId': 'total_sessions',
-    'length': 'total_listen_time',
-    'artist': 'unique_artists',
-    'song': 'unique_songs'
+    'sessionId':'total_sessions',
+    'length':'total_listen_time',
+    'artist':'unique_artists',
+    'song':'unique_songs'
 })
 
-# آخر حالة تسجيل دخول لكل مستخدم
-df_last_auth = df.groupby('userId')['last_auth'].last().rename('last_auth_status')
+# Positive / Negative pages
+positive_pages = ['NextSong', 'Home', 'ThumbsUp', 'AddToPlaylist']
+negative_pages = ['Logout', 'Cancel', 'ThumbsDown']
 
-# حساب PositivePage و NegativePage
-positive_pages = ['NextSong', 'Home']       # ممكن تضيف صفحات تعتبر إيجابية
-negative_pages = ['Logout', 'Cancel']       # ممكن تضيف صفحات تعتبر سلبية
-
-df_positive = df[df['page'].isin(positive_pages)].groupby('userId')['page'].count().rename('PositivePage')
-df_negative = df[df['page'].isin(negative_pages)].groupby('userId')['page'].count().rename('NegativePage')
-
-# دمج كل المميزات في DataFrame واحد
-df_features = df_sessions.join(df_last_auth)
-df_features = df_features.join(df_positive)
-df_features = df_features.join(df_negative)
-df_features.reset_index(inplace=True)
-
-# استبدال NaN في PositivePage/NegativePage بـ 0
-df_features['PositivePage'] = df_features['PositivePage'].fillna(0).astype(int)
-df_features['NegativePage'] = df_features['NegativePage'].fillna(0).astype(int)
-
-# إنشاء عمود churn: إذا آخر تسجيل logout → churn=1
-df_features['churn'] = (df_features['last_auth_status'] == 'Logged Out').astype(int)
+df['is_positive'] = df['page'].isin(positive_pages).astype(int)
+df['is_negative'] = df['page'].isin(negative_pages).astype(int)
 
 # -----------------------------
-# حفظ ملف المميزات النهائي
+# Churn definition
+# -----------------------------
+# آخر نشاط لكل مستخدم
+last_activity = df.groupby('userId')['ts'].max()
+
+# ترتيب البيانات لكل مستخدم حسب الوقت تنازلي
+df_sorted = df.sort_values(['userId','ts'], ascending=[True, False])
+
+# آخر 50 نشاط لكل مستخدم
+last_50 = df_sorted.groupby('userId').head(50)
+positive_count = last_50.groupby('userId')['is_positive'].sum()
+total_events_50 = last_50.groupby('userId')['ts'].count()
+
+# تعريف churn: إذا آخر 50 نشاط كلها سلبي أو أقل من 50 نشاط، أو آخر نشاط قبل أكثر من 10 أيام
+df_churn = df_sessions.copy()
+df_churn['churn'] = (
+    ((positive_count == 0) & (total_events_50 == 50)) |  # آخر 50 سلبي كلها
+    (total_events_50 < 50) |  # أقل من 50 نشاط
+    (df['ts'].max() - last_activity > pd.Timedelta(days=10))  # آخر نشاط قبل أكثر من 10 أيام
+).astype(int)
+
+# Merge مع main features
+df_features = df_sessions.join(df_churn[['churn']])
+df_features = df_features.fillna(0).astype(int)
+
+# Relative metrics
+df_features['total_events'] = df_features['total_sessions']
+df_features['positive_ratio'] = df_features['total_events'] / df_features['total_events']  # يبقى 1 لكل مستخدم
+df_features['negative_ratio'] = 1 - df_features['positive_ratio']  # يبقى 0 لكل مستخدم
+df_features['avg_listen_time'] = df_features['total_listen_time'] / df_features['total_sessions']
+
+# -----------------------------
+# Save features
 # -----------------------------
 feature_path.parent.mkdir(parents=True, exist_ok=True)
+df_features.reset_index(inplace=True)
 df_features.to_csv(feature_path, index=False)
 print(f"✅ Features dataset saved: {feature_path}")
-print(df_features.head())
+print("Class distribution:\n", df_features['churn'].value_counts())
