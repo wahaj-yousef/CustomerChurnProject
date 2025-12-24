@@ -1,0 +1,11 @@
+# Python & venv
+__pycache__/
+*.pyc
+venv/
+
+# Data كبيرة
+data/customer_churn.json
+data/customer_churn_mini.json
+data/cleaned_customer_churn.csv
+plots/
+mlruns/
