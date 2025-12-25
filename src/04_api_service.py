@@ -16,6 +16,7 @@ model = joblib.load(MODELS_DIR / "rf_model.pkl")
 scaler = joblib.load(MODELS_DIR / "scaler.pkl")
 feature_names = joblib.load(MODELS_DIR / "feature_names.pkl")
 
+
 # =============================
 # الصفحة الرئيسية
 # =============================
@@ -228,6 +229,7 @@ document.getElementById("predict_btn").onclick = async () => {
 </html>
 """
 
+
 # =============================
 # مسار التنبؤ
 # =============================
@@ -242,7 +244,4 @@ def predict_churn_ajax(data: dict):
     pred = int(model.predict(X_scaled)[0])
     proba = float(model.predict_proba(X_scaled)[0, 1])
 
-    return JSONResponse({
-        "churn_pred": pred,
-        "churn_prob": proba
-    })
+    return JSONResponse({"churn_pred": pred, "churn_prob": proba})

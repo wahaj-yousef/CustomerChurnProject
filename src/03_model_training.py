@@ -3,7 +3,13 @@ import numpy as np
 from sklearn.model_selection import StratifiedKFold
 from sklearn.preprocessing import StandardScaler
 from sklearn.ensemble import RandomForestClassifier
-from sklearn.metrics import accuracy_score, roc_auc_score, f1_score, precision_score, recall_score
+from sklearn.metrics import (
+    accuracy_score,
+    roc_auc_score,
+    f1_score,
+    precision_score,
+    recall_score,
+)
 import joblib
 from pathlib import Path
 import mlflow
@@ -22,10 +28,10 @@ data_path = data_dir / "customer_churn_with_features.csv"
 # -----------------------------
 df = pd.read_csv(data_path)
 print(f"✅ Loaded data: {df.shape}")
-print("Class distribution:\n", df['churn'].value_counts())
+print("Class distribution:\n", df["churn"].value_counts())
 
-X = df.drop(columns=['userId', 'churn', 'churn_score'], errors='ignore')
-y = df['churn']
+X = df.drop(columns=["userId", "churn", "churn_score"], errors="ignore")
+y = df["churn"]
 
 # -----------------------------
 # Scale features
@@ -44,10 +50,7 @@ for train_index, test_index in kf.split(X_scaled, y):
     y_train, y_test = y.iloc[train_index], y.iloc[test_index]
 
     model = RandomForestClassifier(
-        n_estimators=100,
-        max_depth=5,
-        min_samples_leaf=5,
-        random_state=42
+        n_estimators=100, max_depth=5, min_samples_leaf=5, random_state=42
     )
 
     model.fit(X_train, y_train)
@@ -86,10 +89,7 @@ print("===============================\n")
 # Train final model
 # -----------------------------
 final_model = RandomForestClassifier(
-    n_estimators=100,
-    max_depth=5,
-    min_samples_leaf=5,
-    random_state=42
+    n_estimators=100, max_depth=5, min_samples_leaf=5, random_state=42
 )
 final_model.fit(X_scaled, y)
 

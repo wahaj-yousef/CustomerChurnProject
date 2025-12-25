@@ -21,7 +21,9 @@ except FileNotFoundError:
 
 model = joblib.load(model_path)
 
-features = df_old.drop(columns=['userId','churn','last_auth_status'], errors='ignore').columns
+features = df_old.drop(
+    columns=["userId", "churn", "last_auth_status"], errors="ignore"
+).columns
 
 if df_new is not None:
     drift_results = {}
@@ -36,10 +38,10 @@ if df_new is not None:
     for k, v in drift_results.items():
         print(f"{k}: {v:.4f}")
 
-    drift_detected = {k:v for k,v in drift_results.items() if v < 0.05}
+    drift_detected = {k: v for k, v in drift_results.items() if v < 0.05}
     print("\n🚨 Features with potential drift (p < 0.05):")
     if drift_detected:
-        for k,v in drift_detected.items():
+        for k, v in drift_detected.items():
             print(f"{k}: p={v:.4f}")
     else:
         print("No features with potential drift detected.")
