@@ -1,6 +1,5 @@
 import pandas as pd
 from pathlib import Path
-import numpy as np
 
 # -----------------------------
 # Paths
@@ -16,67 +15,107 @@ cleaned_path = data_dir / "cleaned_customer_churn.csv"
 # -----------------------------
 df = pd.read_csv(cleaned_path)
 df['ts'] = pd.to_datetime(df['ts'])
+df['date'] = df['ts'].dt.date
+
+# -----------------------------
+# Snapshot date (robust)
+# -----------------------------
+snapshot_ts = df['ts'].quantile(0.8)
+
+# نستخدم فقط البيانات قبل الـ snapshot للـ features
+df_features_base = df[df['ts'] <= snapshot_ts].copy()
 
 # -----------------------------
 # Feature Engineering
 # -----------------------------
-# Aggregate sessions per user
-df_sessions = df.groupby('userId').agg({
-    'sessionId':'count',
-    'length':'sum',
-    'artist':'nunique',
-    'song':'nunique'
-}).rename(columns={
-    'sessionId':'total_sessions',
-    'length':'total_listen_time',
-    'artist':'unique_artists',
-    'song':'unique_songs'
-})
 
-# Positive / Negative pages
-positive_pages = ['NextSong', 'Home', 'ThumbsUp', 'AddToPlaylist']
-negative_pages = ['Logout', 'Cancel', 'ThumbsDown']
+# Activity
+activity = df_features_base.groupby('userId').agg(
+    total_events=('ts', 'count'),
+    total_sessions=('sessionId', 'nunique'),
+    active_days=('date', 'nunique'),
+    first_seen=('ts', 'min'),
+    last_seen=('ts', 'max')
+)
 
-df['is_positive'] = df['page'].isin(positive_pages).astype(int)
-df['is_negative'] = df['page'].isin(negative_pages).astype(int)
+activity['tenure_days'] = (activity['last_seen'] - activity['first_seen']).dt.days
+activity['days_since_last_activity'] = (snapshot_ts - activity['last_seen']).dt.days
+activity['avg_events_per_session'] = activity['total_events'] / activity['total_sessions']
+activity = activity.drop(columns=['first_seen', 'last_seen'])
+
+# Listening
+songs = df_features_base[df_features_base['page'] == 'NextSong']
+listening = songs.groupby('userId').agg(
+    total_songs=('song', 'count'),
+    total_listen_time=('length', 'sum'),
+    avg_song_length=('length', 'mean'),
+    unique_artists=('artist', 'nunique'),
+    unique_songs=('song', 'nunique')
+)
+
+# Engagement
+engagement = df_features_base.groupby('userId').agg(
+    thumbs_up_count=('page', lambda x: (x == 'ThumbsUp').sum()),
+    thumbs_down_count=('page', lambda x: (x == 'ThumbsDown').sum()),
+    add_to_playlist_count=('page', lambda x: (x == 'AddToPlaylist').sum()),
+    add_friend_count=('page', lambda x: (x == 'AddFriend').sum())
+)
+
+# Friction
+friction = df_features_base.groupby('userId').agg(
+    logout_count=('page', lambda x: (x == 'Logout').sum()),
+    help_page_views=('page', lambda x: (x == 'Help').sum()),
+    error_rate=('status', lambda x: (x != 200).mean())
+)
+
+# Plan
+plan = df_features_base.groupby('userId').agg(
+    is_paid=('level', lambda x: int((x == 'paid').any())),
+    paid_ratio=('level', lambda x: (x == 'paid').mean())
+)
+
+# Windows
+def window_count(days, page=None):
+    cutoff = snapshot_ts - pd.Timedelta(days=days)
+    subset = df_features_base[df_features_base['ts'] >= cutoff]
+    if page:
+        subset = subset[subset['page'] == page]
+    return subset.groupby('userId').size()
+
+windows = pd.DataFrame(index=activity.index)
+windows['events_last_7d'] = window_count(7)
+windows['events_last_30d'] = window_count(30)
+windows['songs_last_30d'] = window_count(30, 'NextSong')
+
+# Merge
+df_features = (
+    activity
+    .join(listening)
+    .join(engagement)
+    .join(friction)
+    .join(plan)
+    .join(windows)
+).fillna(0)
 
 # -----------------------------
 # Churn definition
 # -----------------------------
-# آخر نشاط لكل مستخدم
-last_activity = df.groupby('userId')['ts'].max()
+activity_after_snapshot = (
+    df[df['ts'] > snapshot_ts]
+    .groupby('userId')['ts']
+    .count()
+)
 
-# ترتيب البيانات لكل مستخدم حسب الوقت تنازلي
-df_sorted = df.sort_values(['userId','ts'], ascending=[True, False])
-
-# آخر 50 نشاط لكل مستخدم
-last_50 = df_sorted.groupby('userId').head(50)
-positive_count = last_50.groupby('userId')['is_positive'].sum()
-total_events_50 = last_50.groupby('userId')['ts'].count()
-
-# تعريف churn: إذا آخر 50 نشاط كلها سلبي أو أقل من 50 نشاط، أو آخر نشاط قبل أكثر من 10 أيام
-df_churn = df_sessions.copy()
-df_churn['churn'] = (
-    ((positive_count == 0) & (total_events_50 == 50)) |  # آخر 50 سلبي كلها
-    (total_events_50 < 50) |  # أقل من 50 نشاط
-    (df['ts'].max() - last_activity > pd.Timedelta(days=10))  # آخر نشاط قبل أكثر من 10 أيام
+df_features['churn'] = (
+    ~df_features.index.isin(activity_after_snapshot.index)
 ).astype(int)
 
-# Merge مع main features
-df_features = df_sessions.join(df_churn[['churn']])
-df_features = df_features.fillna(0).astype(int)
-
-# Relative metrics
-df_features['total_events'] = df_features['total_sessions']
-df_features['positive_ratio'] = df_features['total_events'] / df_features['total_events']  # يبقى 1 لكل مستخدم
-df_features['negative_ratio'] = 1 - df_features['positive_ratio']  # يبقى 0 لكل مستخدم
-df_features['avg_listen_time'] = df_features['total_listen_time'] / df_features['total_sessions']
-
 # -----------------------------
-# Save features
+# Save
 # -----------------------------
 feature_path.parent.mkdir(parents=True, exist_ok=True)
 df_features.reset_index(inplace=True)
 df_features.to_csv(feature_path, index=False)
+
 print(f"✅ Features dataset saved: {feature_path}")
 print("Class distribution:\n", df_features['churn'].value_counts())
