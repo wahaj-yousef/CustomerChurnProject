@@ -50,29 +50,25 @@ for train_index, test_index in kf.split(X_scaled, y):
     y_train, y_test = y.iloc[train_index], y.iloc[test_index]
 
     model = RandomForestClassifier(
-        n_estimators=100, max_depth=5, min_samples_leaf=5, random_state=42
+        class_weight="balanced",  # ← تعديل بسيط
+        n_estimators=100,
+        max_depth=5,
+        min_samples_leaf=5,
+        random_state=42
     )
 
     model.fit(X_train, y_train)
-    y_pred = model.predict(X_test)
 
-    y_proba = model.predict_proba(X_test)
-    if y_proba.shape[1] == 2:
-        y_proba = y_proba[:, 1]
-    else:
-        y_proba = np.zeros_like(y_test, dtype=float)
-        if model.classes_[0] == 1:
-            y_proba[:] = 1.0
+    # تعديل Threshold فقط
+    y_probs = model.predict_proba(X_test)[:, 1] if len(model.classes_) == 2 else np.zeros_like(y_test)
+    y_pred = (y_probs > 0.3).astype(int)  # ← Threshold 0.3
 
     accuracy_list.append(accuracy_score(y_test, y_pred))
     f1_list.append(f1_score(y_test, y_pred, zero_division=0))
     precision_list.append(precision_score(y_test, y_pred, zero_division=0))
     recall_list.append(recall_score(y_test, y_pred, zero_division=0))
 
-    if len(np.unique(y_test)) > 1:
-        roc_list.append(roc_auc_score(y_test, y_proba))
-    else:
-        roc_list.append(np.nan)
+    roc_list.append(roc_auc_score(y_test, y_probs) if len(np.unique(y_test)) > 1 else np.nan)
 
 # -----------------------------
 # CV Metrics
@@ -89,8 +85,13 @@ print("===============================\n")
 # Train final model
 # -----------------------------
 final_model = RandomForestClassifier(
-    n_estimators=100, max_depth=5, min_samples_leaf=5, random_state=42
+    class_weight="balanced",
+    n_estimators=100,
+    max_depth=5,
+    min_samples_leaf=5,
+    random_state=42
 )
+
 final_model.fit(X_scaled, y)
 
 # -----------------------------
