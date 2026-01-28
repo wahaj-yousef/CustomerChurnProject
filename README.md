@@ -34,7 +34,7 @@
 - Scikit-learn  
 - FastAPI  
 - Docker
-## نتائج التقييم
+## نتائج التقييم (Cross-Validation Model Evaluation)
 
 <div dir="rtl">
 
