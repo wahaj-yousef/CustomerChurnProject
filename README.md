@@ -57,7 +57,7 @@
 
 ```bash
 docker build -t customer-churn 
-docker run -p 8080:8080 customer-churn
+docker run -p 8080:8000 customer-churn
 
 ```
 
