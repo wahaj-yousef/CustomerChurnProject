@@ -36,7 +36,7 @@ df_old = pd.read_csv(old_data_path)
 try:
     df_new = pd.read_csv(new_data_path)
 except FileNotFoundError:
-    print(f"⚠️ الملف الجديد غير موجود: {new_data_path}")
+    print(f"⚠️ File not found: {new_data_path}")
     df_new = None
 
 model = joblib.load(model_path)
